@@ -39,25 +39,44 @@
 
 package com.github.shadowsocks.database
 
-import android.content.SharedPreferences
 import android.util.Log
-import com.github.shadowsocks._
-import com.github.shadowsocks.utils.Key
+import com.github.shadowsocks.ShadowsocksApplication.app
 
-class ProfileManager(settings: SharedPreferences, dbHelper: DBHelper) {
+object ProfileManager {
+  private final val TAG = "ProfileManager"
+}
+
+class ProfileManager(dbHelper: DBHelper) {
+  import ProfileManager._
 
   var profileAddedListener: Profile => Any = _
   def setProfileAddedListener(listener: Profile => Any) = this.profileAddedListener = listener
 
-  def createOrUpdateProfile(profile: Profile): Boolean = {
+  def createProfile(p: Profile = null): Profile = {
     try {
+      val profile = if (p == null) new Profile else p
+      profile.id = 0
+      app.currentProfile match {
+        case Some(oldProfile) =>
+          // Copy Feature Settings from old profile
+          profile.route = oldProfile.route
+          profile.ipv6 = oldProfile.ipv6
+          profile.proxyApps = oldProfile.proxyApps
+          profile.bypass = oldProfile.bypass
+          profile.individual = oldProfile.individual
+          profile.udpdns = oldProfile.udpdns
+        case _ =>
+      }
+      val last = dbHelper.profileDao.queryRaw(dbHelper.profileDao.queryBuilder.selectRaw("MAX(userOrder)")
+        .prepareStatementString).getFirstResult
+      if (last != null && last.length == 1 && last(0) != null) profile.userOrder = last(0).toInt + 1
       dbHelper.profileDao.createOrUpdate(profile)
       if (profileAddedListener != null) profileAddedListener(profile)
-      true
+      profile
     } catch {
       case ex: Exception =>
-        Log.e(Shadowsocks.TAG, "addProfile", ex)
-        false
+        Log.e(TAG, "addProfile", ex)
+        p
     }
   }
 
@@ -67,7 +86,7 @@ class ProfileManager(settings: SharedPreferences, dbHelper: DBHelper) {
       true
     } catch {
       case ex: Exception =>
-        Log.e(Shadowsocks.TAG, "addProfile", ex)
+        Log.e(TAG, "updateProfile", ex)
         false
     }
   }
@@ -80,7 +99,7 @@ class ProfileManager(settings: SharedPreferences, dbHelper: DBHelper) {
       }
     } catch {
       case ex: Exception =>
-        Log.e(Shadowsocks.TAG, "getProfile", ex)
+        Log.e(TAG, "getProfile", ex)
         None
     }
   }
@@ -91,81 +110,31 @@ class ProfileManager(settings: SharedPreferences, dbHelper: DBHelper) {
       true
     } catch {
       case ex: Exception =>
-        Log.e(Shadowsocks.TAG, "delProfile", ex)
+        Log.e(TAG, "delProfile", ex)
         false
+    }
+  }
+
+  def getFirstProfile = {
+    try {
+      val result = dbHelper.profileDao.query(dbHelper.profileDao.queryBuilder.limit(1L).prepare)
+      if (result.size == 1) Option(result.get(0)) else None
+    } catch {
+      case ex: Exception =>
+        Log.e(TAG, "getAllProfiles", ex)
+        None
     }
   }
 
   def getAllProfiles: Option[List[Profile]] = {
     try {
       import scala.collection.JavaConversions._
-      Option(dbHelper.profileDao.queryForAll().toList)
+      Option(dbHelper.profileDao.query(dbHelper.profileDao.queryBuilder.orderBy("userOrder", true).prepare).toList)
     } catch {
       case ex: Exception =>
-        Log.e(Shadowsocks.TAG, "getAllProfiles", ex)
+        Log.e(TAG, "getAllProfiles", ex)
         None
     }
-  }
-
-  def reload(id: Int): Profile = {
-    save()
-    load(id)
-  }
-
-  def load(id: Int): Profile =  {
-
-    val profile = getProfile(id) getOrElse {
-      val p = new Profile()
-      createOrUpdateProfile(p)
-      p
-    }
-
-    val edit = settings.edit()
-    edit.putBoolean(Key.isProxyApps, profile.proxyApps)
-    edit.putBoolean(Key.isBypassApps, profile.bypass)
-    edit.putBoolean(Key.isUdpDns, profile.udpdns)
-    edit.putBoolean(Key.isAuth, profile.auth)
-    edit.putBoolean(Key.isIpv6, profile.ipv6)
-    edit.putString(Key.profileName, profile.name)
-    edit.putString(Key.proxy, profile.host)
-    edit.putString(Key.sitekey, profile.password)
-    edit.putString(Key.encMethod, profile.method)
-    edit.putInt(Key.remotePort, profile.remotePort)
-    edit.putInt(Key.localPort, profile.localPort)
-    edit.putString(Key.proxied, profile.individual)
-    edit.putInt(Key.profileId, profile.id)
-    edit.putString(Key.route, profile.route)
-    edit.apply()
-
-    profile
-  }
-
-  private def loadFromPreferences: Profile = {
-    val profile = new Profile()
-
-    profile.id = settings.getInt(Key.profileId, -1)
-
-    profile.proxyApps = settings.getBoolean(Key.isProxyApps, false)
-    profile.bypass = settings.getBoolean(Key.isBypassApps, false)
-    profile.udpdns = settings.getBoolean(Key.isUdpDns, false)
-    profile.auth = settings.getBoolean(Key.isAuth, false)
-    profile.ipv6 = settings.getBoolean(Key.isIpv6, false)
-    profile.name = settings.getString(Key.profileName, "default")
-    profile.host = settings.getString(Key.proxy, "127.0.0.1")
-    profile.password = settings.getString(Key.sitekey, "default")
-    profile.method = settings.getString(Key.encMethod, "table")
-    profile.route = settings.getString(Key.route, "all")
-    profile.remotePort = settings.getInt(Key.remotePort, 1984)
-    profile.localPort = settings.getInt(Key.localPort, 1984)
-    profile.individual = settings.getString(Key.proxied, "")
-
-    profile
-  }
-
-  def save(): Profile = {
-    val profile = loadFromPreferences
-    updateProfile(profile)
-    profile
   }
 
   def createDefault(): Profile = {
@@ -175,7 +144,6 @@ class ProfileManager(settings: SharedPreferences, dbHelper: DBHelper) {
       remotePort = 443
       password = "u1rRWTssNv0p"
     }
-    createOrUpdateProfile(profile)
-    profile
+    createProfile(profile)
   }
 }

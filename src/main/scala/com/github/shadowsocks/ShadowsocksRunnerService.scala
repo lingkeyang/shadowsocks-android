@@ -40,61 +40,28 @@
 package com.github.shadowsocks
 
 import android.app.Service
-import android.content._
+import android.content.Intent
 import android.net.VpnService
-import android.os._
-import com.github.shadowsocks.aidl.IShadowsocksService
-import com.github.shadowsocks.utils._
+import android.os.{IBinder, Handler}
+import com.github.shadowsocks.utils.ConfigUtils
+import com.github.shadowsocks.ShadowsocksApplication.app
 
-class ShadowsocksRunnerService extends Service {
+class ShadowsocksRunnerService extends Service with ServiceBoundContext {
   val handler = new Handler()
-  val connection = new ServiceConnection {
-    override def onServiceConnected(name: ComponentName, service: IBinder) {
-      bgService = IShadowsocksService.Stub.asInterface(service)
-      handler.postDelayed(() => if (bgService != null) startBackgroundService(), 1000)
-    }
-    override def onServiceDisconnected(name: ComponentName) {
-      bgService = null
-    }
-  }
-
-  // Variables
-  var bgService: IShadowsocksService = _
 
   override def onBind(intent: Intent): IBinder = {
     null
   }
 
-  def startBackgroundService() {
-    if (ShadowsocksApplication.isVpnEnabled) {
-      val intent = VpnService.prepare(ShadowsocksRunnerService.this)
-      if (intent == null) {
-        if (bgService != null) {
-          bgService.start(ConfigUtils.load(ShadowsocksApplication.settings))
-        }
-      }
-    } else {
-      bgService.start(ConfigUtils.load(ShadowsocksApplication.settings))
-    }
-    stopSelf()
+  override def onServiceConnected() {
+    handler.postDelayed(() => if (bgService != null) {
+      if (app.isNatEnabled) startBackgroundService()
+      else if (VpnService.prepare(ShadowsocksRunnerService.this) == null) startBackgroundService()
+      stopSelf()
+    }, 1000)
   }
 
-  def attachService() {
-    if (bgService == null) {
-      val s = if (!ShadowsocksApplication.isVpnEnabled) classOf[ShadowsocksNatService] else classOf[ShadowsocksVpnService]
-      val intent = new Intent(this, s)
-      intent.setAction(Action.SERVICE)
-      bindService(intent, connection, Context.BIND_AUTO_CREATE)
-      startService(new Intent(this, s))
-    }
-  }
-
-  def deattachService() {
-    if (bgService != null) {
-      unbindService(connection)
-      bgService = null
-    }
-  }
+  def startBackgroundService() = bgService.useSync(app.profileId)
 
   override def onCreate() {
     super.onCreate()
@@ -103,6 +70,6 @@ class ShadowsocksRunnerService extends Service {
 
   override def onDestroy() {
     super.onDestroy()
-    deattachService()
+    detachService()
   }
 }

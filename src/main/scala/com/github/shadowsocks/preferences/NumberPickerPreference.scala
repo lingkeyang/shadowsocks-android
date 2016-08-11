@@ -2,9 +2,10 @@ package com.github.shadowsocks.preferences
 
 import android.content.Context
 import android.content.res.TypedArray
+import android.os.Bundle
 import android.preference.DialogPreference
 import android.util.AttributeSet
-import android.view.ViewGroup
+import android.view.{ViewGroup, WindowManager}
 import android.widget.NumberPicker
 import com.github.shadowsocks.R
 
@@ -22,13 +23,12 @@ final class NumberPickerPreference(context: Context, attrs: AttributeSet = null)
     setMax(a.getInt(R.styleable.NumberPickerPreference_max, Int.MaxValue - 1))
     a.recycle
   }
-  initSummary(context, attrs)
 
   def getValue = value
   def getMin = if (picker == null) 0 else picker.getMinValue
   def getMax = picker.getMaxValue
   def setValue(i: Int) {
-    if (i == getValue || !callChangeListener(i)) return
+    if (i == getValue) return
     picker.setValue(i)
     value = picker.getValue
     persistInt(value)
@@ -37,6 +37,10 @@ final class NumberPickerPreference(context: Context, attrs: AttributeSet = null)
   def setMin(value: Int) = picker.setMinValue(value)
   def setMax(value: Int) = picker.setMaxValue(value)
 
+  override protected def showDialog(state: Bundle) {
+    super.showDialog(state)
+    getDialog.getWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+  }
   override protected def onCreateDialogView = {
     val parent = picker.getParent.asInstanceOf[ViewGroup]
     if (parent != null) parent.removeView(picker)
@@ -45,7 +49,14 @@ final class NumberPickerPreference(context: Context, attrs: AttributeSet = null)
   override protected def onDialogClosed(positiveResult: Boolean) {
     picker.clearFocus // commit changes
     super.onDialogClosed(positiveResult)  // forward compatibility
-    if (positiveResult) setValue(picker.getValue) else picker.setValue(value)
+    if (positiveResult) {
+      val value = picker.getValue
+      if (callChangeListener(value)) {
+        setValue(value)
+        return
+      }
+    }
+    picker.setValue(value)
   }
   override protected def onGetDefaultValue(a: TypedArray, index: Int) = a.getInt(index, getMin).asInstanceOf[AnyRef]
   override protected def onSetInitialValue(restorePersistedValue: Boolean, defaultValue: Any) {
